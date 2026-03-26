@@ -42,10 +42,9 @@ class _MarketOverlayState extends State<MarketOverlay> {
 
   AugmentType _getRandomAugment() {
     final rand = Random().nextInt(100);
-    if (rand < 15) return AugmentType.refresh; // %15
-    if (rand < 40) return AugmentType.antidote; // %25
-    if (rand < 70) return AugmentType.gyro; // %30
-    return AugmentType.freeze; // %30
+    // Panzehir sadece 50 puan ve üstünde çıkabilir
+    if (rand < 30 && widget.game.scoreNotifier.value >= 50) return AugmentType.antidote;
+    return rand < 65 ? AugmentType.gyro : AugmentType.freeze;
   }
 
   Future<void> _buyAugment(AugmentType type, int index) async {
@@ -110,15 +109,45 @@ class _MarketOverlayState extends State<MarketOverlay> {
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: List.generate(3, (index) {
-                    final augment = slots[index];
-                    final canAfford = score >= augment.cost;
-                    return _AugmentCard(
-                      augment: augment,
-                      canAfford: canAfford,
-                      onTap: () => _buyAugment(augment, index),
-                    );
-                  }),
+                  children: [
+                    ...List.generate(3, (index) {
+                      final augment = slots[index];
+                      final canAfford = score >= augment.cost;
+                      return _AugmentCard(
+                        augment: augment,
+                        canAfford: canAfford,
+                        onTap: () => _buyAugment(augment, index),
+                      );
+                    }),
+                    Container(
+                      width: 1, 
+                      height: 60, 
+                      color: Colors.white.withValues(alpha: 0.2), 
+                      margin: const EdgeInsets.symmetric(horizontal: 4)
+                    ),
+                    GestureDetector(
+                      onTap: () => _buyAugment(AugmentType.refresh, -1),
+                      child: Opacity(
+                        opacity: score >= AugmentType.refresh.cost ? 1.0 : 0.4,
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white24, width: 1.5),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.refresh, color: Colors.blueAccent, size: 24),
+                              const SizedBox(height: 4),
+                              Text('${AugmentType.refresh.cost} Pts', style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -189,8 +218,8 @@ class _AugmentCardState extends State<_AugmentCard>
           duration: const Duration(milliseconds: 200),
           opacity: widget.canAfford ? 1.0 : 0.4,
           child: Container(
-            width: 90,
-            height: 110,
+            width: 75,
+            height: 115,
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
@@ -217,17 +246,18 @@ class _AugmentCardState extends State<_AugmentCard>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(widget.augment.icon, color: Colors.white, size: 36),
-                const SizedBox(height: 8),
+                Icon(widget.augment.icon, color: Colors.white, size: 28),
+                const SizedBox(height: 4),
                 Text(
                   widget.augment.name,
                   textAlign: TextAlign.center,
+                  maxLines: 2,
                   style: const TextStyle(
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
