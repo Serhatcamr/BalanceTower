@@ -288,8 +288,8 @@ class BalanceTowerGame extends Forge2DGame {
       warningTimer = 0.0;
     }
 
-    // Tahta 22 dereceye (0.38 rad) kadar oyuncuya şans tanır.
-    if (angleAbs > 0.38 && !isAvalanching) {
+    // HACİYATMAZ: Daha fazla eğilmeye (0.8 rad ~ 45 derece) şans tanır.
+    if (angleAbs > 0.8 && !isAvalanching) {
       isAvalanching = true;
       platform.body.angularDamping = 0.5; // Kilidi çöz, serbest sallansın
       platform.body.applyAngularImpulse(300.0 * (platform.body.angle > 0 ? 1 : -1));
@@ -299,22 +299,21 @@ class BalanceTowerGame extends Forge2DGame {
       });
     }
 
-    // Tahta aşırı eğilirse (1.2 radyan ~ 70 derece) Game Over tetiklenir (veya platform boşalınca).
-    if (angleAbs > 1.2) {
+    // HACİYATMAZ: Tam devrilmeden (1.6 radyan ~ 92 derece) Game Over tetiklenmez.
+    if (angleAbs > 1.6) {
       triggerGameOver();
     }
 
     if (hasDroppedFirstBlock) {
-      // Platform çok eğildiğinde taşlar dökülürken hemen Game Over olmasın. 
-      // Aşağıdaki yer seviyesine (Y=40) yaklaşana kadar (Y=38) tarama yapıyoruz ki dökülüşü tam izleyebilsinler.
-      final activeBlocks = world.children.whereType<FallingBlock>().where((b) => b.isDropped && b.body.position.y <= 38.0);
+      // Yer seviyesi (14.5) civarına düşene kadar bekle
+      final activeBlocks = world.children.whereType<FallingBlock>().where((b) => b.isDropped && b.body.position.y <= 25.0);
       if (activeBlocks.isEmpty) {
         triggerGameOver();
       }
     }
 
-    double targetGravity = 15.0 + (scoreNotifier.value / 50.0) * 1.5;
-    targetGravity = targetGravity.clamp(15.0, 30.0);
+    double targetGravity = 25.0 + (scoreNotifier.value / 50.0) * 1.5;
+    targetGravity = targetGravity.clamp(25.0, 40.0);
     world.gravity.setValues(0, targetGravity);
   }
 }
@@ -322,10 +321,10 @@ class BalanceTowerGame extends Forge2DGame {
 class Ground extends BodyComponent {
   @override
   Body createBody() {
-    final shape = PolygonShape()..setAsBox(50.0, 5.0, Vector2.zero(), 0.0);
-    final fixtureDef = FixtureDef(shape)..friction = 0.8;
+    final shape = PolygonShape()..setAsBox(100.0, 1.0, Vector2.zero(), 0.0);
+    final fixtureDef = FixtureDef(shape)..friction = 1.0;
     final bodyDef = BodyDef()
-      ..position = Vector2(0, 40.0)
+      ..position = Vector2(0, 14.5) // Hacıyatmaz'ın tabanının basacağı yer
       ..type = BodyType.static;
     return world.createBody(bodyDef)..createFixture(fixtureDef);
   }
@@ -337,31 +336,62 @@ class PivotPlatform extends BodyComponent {
 
   @override
   Body createBody() {
-    // Kalınlık 0.5 yapıldı (Toplam 1.0 birim). İnce yüzeylerde 'tunneling' (içinden geçme) sorununu önler.
-    final shape = PolygonShape()..setAsBox(8.0, 0.5, Vector2.zero(), 0.0);
-    final fixtureDef = FixtureDef(shape)
+    // 1. ÜST YÜZEY (Blokların konacağı yer)
+    final topShape = PolygonShape()..setAsBox(8.0, 0.4, Vector2(0, -0.2), 0.0);
+    final topFixture = FixtureDef(topShape)
       ..friction = 1.0
-      ..density = 50.0;
+      ..density = 10.0;
+
+    // 2. KAVİSLİ ALT KISIM (Semi-circle hull for 'Hacıyatmaz' effect)
+    final hullShape = PolygonShape()..set([
+      Vector2(-8.0, 0.0),
+      Vector2(-7.2, 3.5),
+      Vector2(-4.5, 6.7),
+      Vector2(0, 8.0),
+      Vector2(4.5, 6.7),
+      Vector2(7.2, 3.5),
+      Vector2(8.0, 0.0),
+    ]);
+    final hullFixture = FixtureDef(hullShape)
+      ..friction = 1.0
+      ..density = 20.0;
+
+    // 3. AĞIRLIK MERKEZİ (Düşük COM için en alta ağır bir kütle ekliyoruz)
+    final weightShape = CircleShape()..radius = 0.5..position.setValues(0, 7.8);
+    final weightFixture = FixtureDef(weightShape)
+      ..density = 500.0; // Süper ağır taban
 
     final bodyDef = BodyDef()
-      ..position = Vector2(0, 6.3) // Yüksekliği hafifçe aşağı çektik çünkü box kalınlaştı (Yüzey yine ~5.8'de kalsın diye)
-      ..angularDamping = 30.0
-      ..type = BodyType.dynamic;
+      ..position = Vector2(0, 6.5) // Yerden (14.5) yaklaşık 8 birim yukarda durur ki taban değsin
+      ..type = BodyType.dynamic
+      ..angularDamping = 0.5
+      ..linearDamping = 0.5;
 
-    final platformBody = world.createBody(bodyDef)..createFixture(fixtureDef);
+    final body = world.createBody(bodyDef);
+    body.createFixture(topFixture);
+    body.createFixture(hullFixture);
+    body.createFixture(weightFixture);
 
-    final jointDef = RevoluteJointDef()
-      ..initialize(groundBody, platformBody, Vector2(0, 6.0));
-
-    world.createJoint(RevoluteJoint(jointDef));
-    return platformBody;
+    return body;
   }
 
   @override
   void render(Canvas canvas) {
-    // Platformun kendi gövdesini (beyaz çubuk) çiz - Fiziksel kalınlık 0.5 (Toplam 1.0)
+    // 1. ÜST YÜZEYİ ÇİZ
     final paint = Paint()..color = Colors.white;
-    canvas.drawRect(Rect.fromLTWH(-8.0, -0.5, 16.0, 1.0), paint);
+    canvas.drawRect(Rect.fromLTWH(-8.0, -0.4, 16.0, 0.4), paint);
+
+    // 2. KAVİSLİ ALTI ÇİZ (Hacıyatmaz görseli)
+    final path = Path()
+      ..moveTo(-8.0, 0)
+      ..relativeQuadraticBezierTo(4, 8, 8, 8) // Sol kavis
+      ..relativeQuadraticBezierTo(4, 0, 8, -8) // Sağ kavis
+      ..close();
+    canvas.drawPath(path, paint);
+
+    // 3. TABANDAKİ AĞIRLIĞI GÖSTER (Vurgu için)
+    final weightPaint = Paint()..color = Colors.white.withValues(alpha: 0.5);
+    canvas.drawCircle(Offset(0, 7.5), 0.7, weightPaint);
 
     // 1010-Stili Görünmez (Şu an görünür) Tahta Izgarası - 22 Kare Genişlik (-11.0 to 11.0)
     final gridLinePaint = Paint()

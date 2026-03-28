@@ -207,7 +207,6 @@ class FallingBlock extends BodyComponent<BalanceTowerGame>
     super.update(dt);
 
     if (!isDropped) {
-      // Sürüklenirken platformun açısını kopyala ki tam açıyla otursun
       if (_dragged) {
         body.setTransform(body.position, game.platform.body.angle + _rotationOffset);
       } else {
@@ -215,12 +214,11 @@ class FallingBlock extends BodyComponent<BalanceTowerGame>
       }
     } else {
       _droppedTime += dt;
-      // Düşen bloklar sonsuza kadar birikmesin, 5 sn sonra erisin (y-limit 30.0)
       if (_droppedTime > 5.0 && body.position.y > 30.0) {
         removeFromParent();
       }
 
-      // 1. Kule tamamen döküldüyse (Platform boş kaldıysa) oyunu bitir (Haksızlığı önle)
+      // Kule döküldüyse oyunu bitir
       if (game.hasDroppedFirstBlock && !game.isAvalanching && !game.isGameOver) {
         bool blocksOnPlatform = world.children.any((c) => 
           c is FallingBlock && c.isDropped && c.body.position.y < 30.0
@@ -231,107 +229,12 @@ class FallingBlock extends BodyComponent<BalanceTowerGame>
         }
       }
 
-      // 2. 'Sanal Tahta' (1010): Eğim < 15 derece ve blok platformun ÜSTÜNDEYSE toplu durur.
-      final localPos = game.platform.body.localPoint(body.position);
-      double angleAbs = game.platform.body.angle.abs();
-      
-      // DESTEK KONTROLÜ (Denge): Blok sadece ağırlık merkezi (karelerin ortalaması) platform üzerindeyse kilitli kalır.
-      double sumLocalX = 0;
-      int rotationSteps = (_rotationOffset / (pi / 2)).round();
-      int steps = (rotationSteps % 4 + 4) % 4;
-
-      for (var sq in squares) {
-          double sx = sq.x, sy = sq.y;
-          for (int i = 0; i < steps; i++) {
-              double t = sx;
-              sx = -sy;
-              sy = t;
-          }
-          final sqLocal = localPos + Vector2(sx, sy);
-          sumLocalX += sqLocal.x;
-      }
-      
-      double averageLocalX = sumLocalX / squares.length;
-      // Denge Sınırı: Ağırlık merkezi platformun (16 birim) dışındaysa takla başlar.
-      bool isBalanced = averageLocalX.abs() <= 8.0;
-
-      if (angleAbs < 0.26 && isBalanced) {
-          // PLATFORM ÜSTÜNDEYİZ VE DENGEDEYİZ: Dik durmaya 'çalış' (Yumuşak yaklaşım)
-          double targetAngle = game.platform.body.angle + _rotationOffset;
-          double angleDiff = targetAngle - body.angle;
-          while (angleDiff > pi) angleDiff -= 2 * pi;
-          while (angleDiff < -pi) angleDiff += 2 * pi;
-          body.angularVelocity = angleDiff * 6.0;
-
-          // HIZ KONTROLLÜ YERLEŞİM (Settling Snap): 
-          // Taş hareket halindeyken mıknatıs KAPALI, sadece durunca 'Cuk' diye yerine oturur.
-          double linearSpeed = body.linearVelocity.length;
-          
-          if (linearSpeed < 0.3) {
-              double sqX = squares[0].x;
-              double sqY = squares[0].y;
-          int steps = (rotationSteps % 4 + 4) % 4;
-          for (int i = 0; i < steps; i++) {
-              double temp = sqX;
-              sqX = -sqY;
-              sqY = temp;
-          }
-          double rem = (sqX.abs() % 1.0);
-          double fractionalOffset = (rem < 0.25 || rem > 0.75) ? 0.5 : 0.0;
-          double snappedLocalX = (localPos.x - fractionalOffset).roundToDouble() + fractionalOffset;
-
-          // Sınır koruması (22 birimlik genişlik kılavuzuna göre)
-          double minX = 100, maxX = -100;
-          for (var sq in squares) {
-            double sx = sq.x, sy = sq.y;
-            for (int i = 0; i < steps; i++) {
-              double t = sx;
-              sx = -sy;
-              sy = t;
-            }
-            if (sx < minX) minX = sx;
-            if (sx > maxX) maxX = sx;
-          }
-          double maxAllowedX = 11.0 - (maxX + 0.5);
-          double minAllowedX = -11.0 - (minX - 0.5);
-          snappedLocalX = snappedLocalX.clamp(minAllowedX, maxAllowedX);
-
-          // EZİLMEYİ ÖNLE: Magnet yüksekliği asla platform yüzeyinin (~ -0.5) altına inemez.
-          double snappedLocalY = localPos.y.clamp(-25.0, -0.6); // 0.1 buffer
-
-          final targetWorldPos = game.platform.body.worldPoint(Vector2(snappedLocalX, snappedLocalY));
-          final diff = targetWorldPos - body.position;
-          
-          double dist = diff.length;
-          double forceMagnitude = dist < 0.15 ? 70.0 : (dist < 0.4 ? 20.0 : 2.0);
-
-          // EZİLMEYİ (Overlap) ÖNLEME: Hedef kare eğer başka bir blok tarafından işgal edildiyse Mıknatısı KAPAT.
-          bool isOccupied = false;
-          final otherBlocks = world.children.whereType<FallingBlock>().where((b) => b != this && b.isDropped);
-          for (final ob in otherBlocks) {
-              if (ob.containsPoint(targetWorldPos)) {
-                  isOccupied = true;
-                  break;
-              }
-          }
-
-              if (!isOccupied) {
-                  body.applyForce(diff * body.mass * forceMagnitude); 
-              }
-              body.linearDamping = 4.0; 
-          } else {
-              body.linearDamping = 0.5; // Hareket halindeyken serbest kayma
-          } 
-      } else {
-          // KENARDAN DÜŞÜYORUZ VEYA ÇIĞ BAŞLADI: Gerçek fizik (takla/devrilme) başlar!
-          if (game.isAvalanching) {
-            // ÇIĞ SIRASINDA: Taşlar 'sabun' gibi kaysınlar (Hızlı dökülme için)
-            body.angularDamping = 0.1;
-            body.linearDamping = 0.1;
-            for (var f in body.fixtures) {
-              f.friction = 0.0;
-            }
-          }
+      if (game.isAvalanching) {
+        body.angularDamping = 0.1;
+        body.linearDamping = 0.1;
+        for (var f in body.fixtures) {
+          f.friction = 0.0;
+        }
       }
     }
   }
@@ -461,16 +364,25 @@ class FallingBlock extends BodyComponent<BalanceTowerGame>
 
         final snappedWorldPos = game.platform.body.worldPoint(Vector2(finalLocalX, targetLocalY));
         
-        // CUK! (Snap before making it dynamic)
         body.setTransform(snappedWorldPos, game.platform.body.angle + _rotationOffset);
-
-        isDropped = true;
         body.setType(BodyType.dynamic);
-        body.isBullet = true; // Mermi fiziği: Sıkışma altında bile iç içe geçmeyi (tunneling) önler.
+        body.isBullet = true; 
+        isDropped = true;
+
+        // HACİYATMAZ: Eğer taş dengeliyse (platform üstündeyse) platforma KAYNAKLA (WeldJoint).
+        // Bu sayede taşlar artık birbirine kuvvet uygulamaz, titremez ve kule tek bir sağlam parça olur.
+        if (targetLocalY < -0.3) {
+           final weldJointDef = WeldJointDef()
+            ..initialize(game.platform.body, body, snappedWorldPos)
+            ..frequencyHz = 0 // Sıfır oyun payı (tamamen rigid)
+            ..dampingRatio = 1.0;
+           world.createJoint(WeldJoint(weldJointDef));
+        }
         
-        // Sürükleme bitince Ghost modundan çıkart ki fiziksel çarpışmalar başlasın
+        // Sürükleme bitince Ghost modundan çıkart
         for (var fixture in body.fixtures) {
           fixture.setSensor(false);
+          fixture.friction = 1.0;
         }
 
         if (!hasScored) {
